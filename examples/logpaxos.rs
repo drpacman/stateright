@@ -33,7 +33,7 @@ use std::iter::Iterator;
 use std::cmp::Ordering;
 use std::time::{ Duration };
 use stateright::semantics::append_only_log::Log;
-use stateright::actor::append_only_log::{LogActor, LogMsg, LogMsg::*};
+use stateright::actor::append_only_log::{LogActor, LogActorState, LogMsg, LogMsg::*};
 
 type Round = u32;
 type Ballot = (Round, Id);
@@ -87,18 +87,16 @@ enum LogPaxosPhase {
 #[derive(Clone)]
 struct LogPaxosActor { 
     peer_ids: Vec<Id>,
-    heartbeat_interval : Range<Duration>,
-    max_ballots : Option<u32>
+    heartbeat_interval : Range<Duration>
 }
 
 impl LogPaxosActor {
-    fn new(peer_ids : Vec<Id>, max_ballots : Option<u32>) -> LogPaxosActor {
+    fn new(peer_ids : Vec<Id>) -> LogPaxosActor {
         let mut sorted_peer_ids = peer_ids.clone();
         sorted_peer_ids.sort();
         LogPaxosActor {
             peer_ids : sorted_peer_ids,
-            heartbeat_interval : Duration::from_millis(HEARTBEAT_TIME/2)..Duration::from_millis(HEARTBEAT_TIME),
-            max_ballots
+            heartbeat_interval : Duration::from_millis(HEARTBEAT_TIME/2)..Duration::from_millis(HEARTBEAT_TIME)
         }
     }
 
@@ -283,15 +281,6 @@ impl Actor for LogPaxosActor {
     }
 
     fn on_timeout(&self, id: Id, state: &mut std::borrow::Cow<Self::State>, out: &mut Out<Self>) {
-        // to prevent an infinite spec for state checking, 
-        // don't create new ballots if we have reached the configured limit
-        match self.max_ballots {
-            Some(max_ballots) if state.ballot.0 >= max_ballots => {
-                log::info!("Reached max ballots {:} on node {:}", max_ballots, id);
-                return
-            }
-            _ => {}
-        }
         out.broadcast(&self.peer_ids, &Internal(KeepAlive)); 
         let mut state = state.to_mut();
         // if this node should be leader and we are not active as leader, start new phase 1
@@ -331,14 +320,23 @@ impl LogPaxosModelCfg {
             )
             .actors((0..self.server_count)
                     .map(|i| LogActor::Server(
-                        LogPaxosActor::new(model_peers(i, self.server_count), Some(self.max_ballots))))
-                    )
+                        LogPaxosActor::new(model_peers(i, self.server_count))
+                    )))
             .actors((0..self.client_count)
                     .map(|_| LogActor::Client {
                         put_count: 1,
                         server_count: self.server_count,
                     }))
             .duplicating_network(DuplicatingNetwork::No)
+            .within_boundary(|cfg, state| {
+                state.actor_states.iter().all(|s| {
+                    if let LogActorState::Server(s) = &**s {
+                        s.ballot.0 <= cfg.max_ballots
+                    } else {
+                        true
+                    }
+                })
+            })
             .property(Expectation::Always, "linearizable", |_, state| {
                 state.history.serialized_history().is_some()
             })
@@ -413,9 +411,9 @@ fn main() -> Result<(), pico_args::Error> {
                 serde_json::to_vec,
                 |bytes| serde_json::from_slice(bytes),
                 vec![
-                    (id0, LogPaxosActor::new( vec![id1, id2], None )),
-                    (id1, LogPaxosActor::new( vec![id0, id2], None )),
-                    (id2, LogPaxosActor::new( vec![id0, id1], None )),
+                    (id0, LogPaxosActor::new( vec![id1, id2] )),
+                    (id1, LogPaxosActor::new( vec![id0, id2] )),
+                    (id2, LogPaxosActor::new( vec![id0, id1] )),
                 ]).unwrap();
         }
         Some("spawnsingle") => {
@@ -443,7 +441,7 @@ fn main() -> Result<(), pico_args::Error> {
                 serde_json::to_vec,
                 |bytes| serde_json::from_slice(bytes),
                 vec![
-                    (server_id.unwrap(), LogPaxosActor::new( servers.values().cloned().collect(), None ))
+                    (server_id.unwrap(), LogPaxosActor::new( servers.values().cloned().collect() ))
                 ]).unwrap();
         }
         _ => {
