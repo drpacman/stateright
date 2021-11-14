@@ -11,8 +11,6 @@ use std::hash::Hash;
 use std::time::Duration;
 use crate::semantics::append_only_log::{Log, LogOp, LogRet};
 
-type Value = char;
-
 /// Defines an interface for a log-like actor.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -230,8 +228,8 @@ where
         use LogActorState as S;
         match (self, &**state) {
             (
-                A::Client { put_count, server_count },
-                S::Client { awaiting: Some(awaiting), op_count },
+                A::Client { put_count: _, server_count: _ },
+                S::Client { awaiting: Some(_awaiting), op_count },
             ) => {
                 // log::info!("Timeout in log actor client");
                 *state = Cow::Owned(LogActorState::Client {
