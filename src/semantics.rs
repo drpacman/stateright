@@ -55,6 +55,7 @@ pub mod register;
 pub use linearizability::LinearizabilityTester;
 pub use sequential_consistency::SequentialConsistencyTester;
 pub mod vec;
+pub mod append_only_log;
 
 /// An implementation of this trait can serve as a sequential "reference object"
 /// (in the sense of an operational specification, not a Rust reference)
