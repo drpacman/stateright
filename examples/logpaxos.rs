@@ -87,16 +87,18 @@ enum LogPaxosPhase {
 #[derive(Clone)]
 struct LogPaxosActor { 
     peer_ids: Vec<Id>,
-    heartbeat_interval : Range<Duration>
+    heartbeat_interval : Range<Duration>,
+    max_ballots : Option<u32>
 }
 
 impl LogPaxosActor {
-    fn new(peer_ids : Vec<Id>) -> LogPaxosActor {
+    fn new(peer_ids : Vec<Id>, max_ballots : Option<u32>) -> LogPaxosActor {
         let mut sorted_peer_ids = peer_ids.clone();
         sorted_peer_ids.sort();
         LogPaxosActor {
             peer_ids : sorted_peer_ids,
-            heartbeat_interval : Duration::from_millis(HEARTBEAT_TIME/2)..Duration::from_millis(HEARTBEAT_TIME)
+            heartbeat_interval : Duration::from_millis(HEARTBEAT_TIME/2)..Duration::from_millis(HEARTBEAT_TIME),
+            max_ballots
         }
     }
 
@@ -281,7 +283,15 @@ impl Actor for LogPaxosActor {
     }
 
     fn on_timeout(&self, id: Id, state: &mut std::borrow::Cow<Self::State>, out: &mut Out<Self>) {
-        out.broadcast(&self.peer_ids, &Internal(KeepAlive));    
+        out.broadcast(&self.peer_ids, &Internal(KeepAlive)); 
+        // stop if we have set a limit on the number of ballots (to aide state checking)
+        match self.max_ballots {
+            Some(max_ballots) if state.ballot.0 >= max_ballots => {
+                log::info!("Reached max ballots {:} on node {:}", max_ballots, id);
+                return
+            }
+            _ => {}
+        }
         let mut state = state.to_mut();
         // if this node should be leader and we are not active as leader, start new phase 1
         if self.is_leader(state) && state.phase == LogPaxosPhase::Follower {
@@ -304,6 +314,7 @@ impl Actor for LogPaxosActor {
 struct LogPaxosModelCfg {
     client_count: usize,
     server_count: usize,
+    max_ballots : u32
 }
 
 impl LogPaxosModelCfg {
@@ -318,7 +329,8 @@ impl LogPaxosModelCfg {
                 LinearizabilityTester::new(Log::<Value>::new())
             )
             .actors((0..self.server_count)
-                    .map(|i| LogActor::Server(LogPaxosActor::new(model_peers(i, self.server_count))))
+                    .map(|i| LogActor::Server(
+                        LogPaxosActor::new(model_peers(i, self.server_count), Some(self.max_ballots))))
                     )
             .actors((0..self.client_count)
                     .map(|_| LogActor::Client {
@@ -359,6 +371,7 @@ fn main() -> Result<(), pico_args::Error> {
             LogPaxosModelCfg {
                     client_count,
                     server_count: 3,
+                    max_ballots: 2
                 }
                 .into_model().checker().threads(num_cpus::get())
                 .spawn_dfs().report(&mut std::io::stdout());
@@ -374,6 +387,7 @@ fn main() -> Result<(), pico_args::Error> {
             LogPaxosModelCfg {
                     client_count,
                     server_count: 3,
+                    max_ballots: 2
                 }
                 .into_model().checker().threads(num_cpus::get())
                 .serve(address);
@@ -398,9 +412,9 @@ fn main() -> Result<(), pico_args::Error> {
                 serde_json::to_vec,
                 |bytes| serde_json::from_slice(bytes),
                 vec![
-                    (id0, LogPaxosActor::new( vec![id1, id2] )),
-                    (id1, LogPaxosActor::new( vec![id0, id2] )),
-                    (id2, LogPaxosActor::new( vec![id0, id1] )),
+                    (id0, LogPaxosActor::new( vec![id1, id2], None )),
+                    (id1, LogPaxosActor::new( vec![id0, id2], None )),
+                    (id2, LogPaxosActor::new( vec![id0, id1], None )),
                 ]).unwrap();
         }
         Some("spawnsingle") => {
@@ -428,7 +442,7 @@ fn main() -> Result<(), pico_args::Error> {
                 serde_json::to_vec,
                 |bytes| serde_json::from_slice(bytes),
                 vec![
-                    (server_id.unwrap(), LogPaxosActor::new( servers.values().cloned().collect()))
+                    (server_id.unwrap(), LogPaxosActor::new( servers.values().cloned().collect(), None ))
                 ]).unwrap();
         }
         _ => {
