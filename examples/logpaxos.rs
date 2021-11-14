@@ -215,7 +215,9 @@ impl Actor for LogPaxosActor {
                     last_accepted: state.accepted.clone(),
                 }));
             }
-            Internal(Prepared { ballot, last_accepted }) if ballot == state.ballot && state.phase == LogPaxosPhase::LeaderPhase1 => {
+            Internal(Prepared { ballot, last_accepted }) 
+                if ballot == state.ballot && 
+                    state.phase == LogPaxosPhase::LeaderPhase1 => {
                 let mut state = state.to_mut();
                 state.prepares.insert(src, last_accepted);
                 if state.prepares.len() == majority(self.peer_ids.len() + 1) {
@@ -232,9 +234,9 @@ impl Actor for LogPaxosActor {
                     state.phase = LogPaxosPhase::LeaderPhase2;
                     // Simulate `Accept` self-send.                            
                     state.accepted = Some((ballot, longest_log.clone()));
-                    // Simulate `Accepted` self-send.
-                   
+                    // Simulate `Accepted` self-send.                   
                     state.accepts.insert(id);
+                    // align all peers with the leader
                     out.broadcast(&self.peer_ids, &Internal(Accept { ballot, log: longest_log.clone() }) );
                 }
             }
