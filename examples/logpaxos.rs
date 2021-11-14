@@ -283,8 +283,8 @@ impl Actor for LogPaxosActor {
     }
 
     fn on_timeout(&self, id: Id, state: &mut std::borrow::Cow<Self::State>, out: &mut Out<Self>) {
-        out.broadcast(&self.peer_ids, &Internal(KeepAlive)); 
-        // stop if we have set a limit on the number of ballots (to aide state checking)
+        // to prevent an infinite spec for state checking, 
+        // don't create new ballots if we have reached the configured limit
         match self.max_ballots {
             Some(max_ballots) if state.ballot.0 >= max_ballots => {
                 log::info!("Reached max ballots {:} on node {:}", max_ballots, id);
@@ -292,6 +292,7 @@ impl Actor for LogPaxosActor {
             }
             _ => {}
         }
+        out.broadcast(&self.peer_ids, &Internal(KeepAlive)); 
         let mut state = state.to_mut();
         // if this node should be leader and we are not active as leader, start new phase 1
         if self.is_leader(state) && state.phase == LogPaxosPhase::Follower {
