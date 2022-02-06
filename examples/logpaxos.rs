@@ -230,7 +230,7 @@ impl Actor for LogPaxosActor {
                             Log::new()
                         }
                     };
-                    // log::info!("Node {:} Become Leader", id);
+                    // log::info!("Node {:} Become Leader for round {:}", id, ballot.0);
                     state.phase = LogPaxosPhase::LeaderPhase2;
                     // Simulate `Accept` self-send.                            
                     state.accepted = Some((ballot, longest_log.clone()));
@@ -285,13 +285,13 @@ impl Actor for LogPaxosActor {
         let mut state = state.to_mut();
         // if this node should be leader and we are not active as leader, start new phase 1
         if self.is_leader(state) && state.phase == LogPaxosPhase::Follower {
-            //log::info!("Node {:} Starting Leader Preparation", id);
             state.phase = LogPaxosPhase::LeaderPhase1;
             state.prepares = Default::default();
             // Simulate `Prepare` self-send.
             state.ballot = (state.ballot.0 + 1, id);
             // Simulate `Prepared` self-send.
             state.prepares.insert(id, state.accepted.clone());
+            // log::info!("Node {:} Starting Leader Preparation for ballot {:}", id, state.ballot.0);
             out.broadcast(&self.peer_ids, &Internal(Prepare { ballot: state.ballot }));
         }            
         state.last_peer_ids = state.current_peer_ids.clone();
